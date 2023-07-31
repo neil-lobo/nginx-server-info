@@ -2,19 +2,44 @@ const ConfigParser = require('@webantic/nginx-config-parser')
 const parser = new ConfigParser()
 const fs = require('fs')
 
-const config = parser.readConfigFile('/etc/nginx/sites-available/default', { parseIncludes: false })
-let out = []
+const out = []
+const files = fs.readdirSync("/etc/nginx/sites-available").filter(file => file !== "default")
 
-config.server.filter(s => s['location /']).forEach(s => out.push({
-    server_name: s.server_name,
-    proxy_pass: s['location /'].proxy_pass
-}))
+for (const file of files) {
+    const config = parser.readConfigFile(`/etc/nginx/sites-available/${file}`, { parseIncludes: false })
+
+    config.server.filter(s => {
+        const keys = Object.keys(s);
+
+        for (const key of keys) {
+            if (key.startsWith("location ")) return true;
+        }
+        return false;
+    }).forEach(s => {
+        const locationKeys = Object.keys(s).filter(k => k.startsWith("location "))
+        const locations = [];
+
+        for (const key of locationKeys) {
+            locations.push({
+                path: key.slice(9),
+                proxy_pass: s[key].proxy_pass
+            })
+        }
+
+        out.push({
+            server_name: s.server_name,
+            locations
+        })
+    })
+}
 
 if(process.argv[2] == "--json" || process.argv[2] == "-j") {
 	console.log(JSON.stringify(out));
 } else {
-    //fs.writeFileSync("./out.json", JSON.stringify(out, null, 2))
     for(let server of out) {
-        console.log(`Domain: ${server.server_name} | Location: ${server.proxy_pass}`)
+        const locations = server.locations.map(({path, proxy_pass}) => {
+            return `Location ${path} -> ${proxy_pass}`
+        });
+        console.log(`${server.server_name} | ${locations.join(" | ")}`)
     }
 }
